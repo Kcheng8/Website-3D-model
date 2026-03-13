@@ -79,8 +79,26 @@
         .status {
             text-align: center;
             color: #5b6574;
-            margin-bottom: 12px;
+            margin-bottom: 6px;
             font-size: 0.95rem;
+        }
+
+        .progress-wrap {
+            width: 100%;
+            height: 6px;
+            background: #e4eaf3;
+            border-radius: 999px;
+            overflow: hidden;
+            margin-bottom: 10px;
+            display: none;
+        }
+
+        .progress-bar {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, var(--accent), var(--secondary));
+            border-radius: 999px;
+            transition: width 0.18s ease;
         }
 
         .viewer {
@@ -208,6 +226,9 @@
             </div>
 
             <p class="status" id="viewerStatus">Loading 7L30.cif...</p>
+            <div class="progress-wrap" id="progressWrap">
+                <div class="progress-bar" id="progressBar"></div>
+            </div>
             <div id="protein-viewer" class="viewer" aria-label="Interactive 3D protein model"></div>
 
             <div class="mode-switch" aria-label="Performance mode switch">
@@ -254,10 +275,10 @@
         let proteinViewer = null;
         let renderQueued = false;
         let useSimplifiedRepresentations = true;
-        let surfaceEnabled = true;
+        let surfaceEnabled = false;
         let surfaceRef = null;
         let surfaceRequestToken = 0;
-        let currentStyle = "line";
+        let currentStyle = "cartoon";
 
         function setStatus(message, isError = false) {
             const status = document.getElementById("viewerStatus");
@@ -265,20 +286,56 @@
             status.style.color = isError ? "#b42318" : "#5b6574";
         }
 
+        function setProgress(pct) {
+            const wrap = document.getElementById("progressWrap");
+            const bar = document.getElementById("progressBar");
+            if (!wrap || !bar) return;
+            if (pct <= 0) {
+                wrap.style.display = "none";
+                bar.style.width = "0%";
+            } else {
+                wrap.style.display = "block";
+                bar.style.width = Math.min(pct, 100) + "%";
+            }
+        }
+
+        async function fetchStreamWithProgress(url) {
+            const response = await fetch(url, { cache: "force-cache" });
+            if (!response.ok || !response.body) throw new Error("Fetch failed: " + url);
+            const total = parseInt(response.headers.get("Content-Length") || "0");
+            const reader = response.body.getReader();
+            const chunks = [];
+            let received = 0;
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                chunks.push(value);
+                received += value.length;
+                if (total > 0) setProgress(Math.round((received / total) * 95));
+            }
+            return new Blob(chunks);
+        }
+
         async function fetchCifData() {
             try {
-                const gzResponse = await fetch("7L30.cif.gz", { cache: "force-cache" });
-                if (gzResponse.ok && gzResponse.body && "DecompressionStream" in window) {
-                    const decompressedStream = gzResponse.body.pipeThrough(new DecompressionStream("gzip"));
-                    return await new Response(decompressedStream).text();
+                if ("DecompressionStream" in window) {
+                    const blob = await fetchStreamWithProgress("7L30.cif.gz");
+                    setProgress(97);
+                    const stream = blob.stream().pipeThrough(new DecompressionStream("gzip"));
+                    const text = await new Response(stream).text();
+                    setProgress(100);
+                    return text;
                 }
             } catch (error) {
                 console.warn("Compressed model load failed, falling back to .cif", error);
+                setProgress(0);
             }
 
-            const response = await fetch("7L30.cif", { cache: "force-cache" });
-            if (!response.ok) throw new Error("Unable to load 7L30.cif");
-            return await response.text();
+            const blob = await fetchStreamWithProgress("7L30.cif");
+            setProgress(97);
+            const text = await blob.text();
+            setProgress(100);
+            return text;
         }
 
         function queueRender() {
@@ -379,7 +436,8 @@
             } else if (style === "sphere") {
                 proteinViewer.setStyle(detailSelection, { sphere: { scale: 0.22, colorscheme: "chain" } });
             } else if (style === "line") {
-                proteinViewer.setStyle(detailSelection, { line: { colorscheme: "chain" } });
+                // lines draw along bonds — CA selection has no bonds, so always use full atom set
+                proteinViewer.setStyle({}, { line: { colorscheme: "chain" } });
             }
 
             queueRender();
@@ -418,15 +476,15 @@
                 proteinViewer.addModel(cifData, "cif");
 
                 useSimplifiedRepresentations = true;
-                surfaceEnabled = true;
+                surfaceEnabled = false;
                 updateModeSwitchUI();
                 updateSurfaceSwitchUI();
                 applyStyle(currentStyle);
                 proteinViewer.zoomTo();
                 queueRender();
-                deferSurfaceRender();
+                setProgress(0);
 
-                setStatus("7L30.cif loaded. Fast mode active; surface will appear shortly.");
+                setStatus("7L30.cif loaded. Toggle surface to enable it.");
             } catch (error) {
                 setStatus(
                     "Could not load model. If testing locally, use a local server (not file:///).",
