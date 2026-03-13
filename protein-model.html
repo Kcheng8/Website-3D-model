@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Interactive Protein Model</title>
+    <meta name="description" content="Interactive 3D protein model viewer for 7L30.cif" />
+    <style>
+        :root {
+            --primary: #1f3a5f;
+            --secondary: #4a6fa5;
+            --accent: #4fb3a2;
+            --text: #1e1e1e;
+            --bg: #f7f9fc;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+        }
+
+        .hero {
+            background: linear-gradient(135deg, var(--primary) 60%, var(--secondary) 100%);
+            color: #fff;
+            padding: 64px 20px 44px;
+            text-align: center;
+        }
+
+        .hero h1 { font-size: 2rem; margin-bottom: 10px; }
+        .hero p { max-width: 760px; margin: 0 auto; opacity: 0.92; }
+
+        .wrap {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 28px 20px 44px;
+            display: grid;
+            grid-template-columns: minmax(0, 1.65fr) minmax(280px, 320px);
+            grid-template-areas: "viewer panel";
+            gap: 24px;
+            align-items: start;
+        }
+
+        .card {
+            background: #fff;
+            border-radius: 16px;
+            box-shadow: 0 10px 28px rgba(31, 58, 95, 0.12);
+            padding: 22px;
+        }
+
+        .viewer-card { grid-area: viewer; min-width: 0; display: flex; flex-direction: column; }
+        .panel { grid-area: panel; position: sticky; top: 20px; }
+
+        .viewer-title, .panel h2 { color: var(--primary); margin-bottom: 10px; }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            margin: 10px 0 12px;
+        }
+
+        .btn {
+            border: none;
+            border-radius: 999px;
+            background: var(--primary);
+            color: #fff;
+            padding: 9px 14px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .btn:hover { background: var(--secondary); }
+
+        .status {
+            text-align: center;
+            color: #5b6574;
+            margin-bottom: 12px;
+            font-size: 0.95rem;
+        }
+
+        .viewer {
+            width: 100%;
+            height: 700px;
+            border: 1px solid rgba(31, 58, 95, 0.12);
+            border-radius: 12px;
+            overflow: hidden;
+            background: linear-gradient(180deg, #fcfdff 0%, #eef3fa 100%);
+            position: relative;
+            isolation: isolate;
+            flex-shrink: 0;
+            margin-bottom: 14px;
+        }
+
+        .viewer canvas,
+        .viewer > div {
+            max-width: 100%;
+            max-height: 100%;
+        }
+
+        .meta {
+            display: grid;
+            gap: 10px;
+            margin: 12px 0 0;
+        }
+
+        .meta-item {
+            border-left: 4px solid var(--accent);
+            background: rgba(79, 179, 162, 0.08);
+            border-radius: 10px;
+            padding: 10px 12px;
+            font-size: 0.95rem;
+        }
+
+        .meta-item strong { display: block; color: var(--primary); margin-bottom: 3px; }
+
+        .help ul { margin: 8px 0 0 18px; }
+
+        @media (max-width: 900px) {
+            .wrap {
+                grid-template-columns: 1fr;
+                grid-template-areas: "viewer" "panel";
+            }
+            .panel { position: static; }
+            .viewer { height: 500px; }
+        }
+
+        @media (max-width: 600px) {
+            .viewer { height: 420px; }
+            .controls { justify-content: flex-start; }
+        }
+    </style>
+</head>
+<body>
+    <header class="hero">
+        <h1>Interactive Protein Model</h1>
+        <p>Rotate, zoom, and inspect structure <strong>7L30</strong> directly in your browser.</p>
+    </header>
+
+    <main class="wrap">
+        <section class="card viewer-card">
+            <h2 class="viewer-title">3D Viewer</h2>
+
+            <div class="controls">
+                <button class="btn" type="button" data-style="cartoon">Cartoon</button>
+                <button class="btn" type="button" data-style="stick">Sticks</button>
+                <button class="btn" type="button" data-style="sphere">Spheres</button>
+                <button class="btn" type="button" data-style="line">Lines</button>
+                <button class="btn" type="button" data-style="reset">Reset View</button>
+            </div>
+
+            <p class="status" id="viewerStatus">Loading 7L30.cif...</p>
+            <div id="protein-viewer" class="viewer" aria-label="Interactive 3D protein model"></div>
+
+            <div class="help">
+                <strong>How to use</strong>
+                <ul>
+                    <li>Drag to rotate</li>
+                    <li>Scroll/trackpad to zoom</li>
+                    <li>Right-drag to translate</li>
+                </ul>
+            </div>
+        </section>
+
+        <aside class="card panel">
+            <h2>Model Details</h2>
+            <p>This page loads the local file <strong>7L30.cif</strong> and renders it with 3Dmol.js.</p>
+            <div class="meta">
+                <div class="meta-item"><strong>File</strong>7L30.cif</div>
+                <div class="meta-item"><strong>Interaction</strong>Rotate, zoom, translate</div>
+                <div class="meta-item"><strong>Representations</strong>Cartoon, stick, sphere, line</div>
+            </div>
+        </aside>
+    </main>
+
+    <script src="https://3Dmol.org/build/3Dmol-min.js"></script>
+    <script>
+        let proteinViewer = null;
+
+        function setStatus(message, isError = false) {
+            const status = document.getElementById("viewerStatus");
+            status.textContent = message;
+            status.style.color = isError ? "#b42318" : "#5b6574";
+        }
+
+        function applyStyle(style) {
+            if (!proteinViewer) return;
+            proteinViewer.setStyle({}, {});
+
+            if (style === "cartoon") {
+                proteinViewer.setStyle({}, { cartoon: { color: "spectrum" } });
+            } else if (style === "stick") {
+                proteinViewer.setStyle({}, { stick: { radius: 0.18, colorscheme: "greenCarbon" } });
+            } else if (style === "sphere") {
+                proteinViewer.setStyle({}, { sphere: { scale: 0.28, colorscheme: "chain" } });
+            } else if (style === "line") {
+                proteinViewer.setStyle({}, { line: { colorscheme: "chain" } });
+            }
+
+            proteinViewer.zoomTo();
+            proteinViewer.render();
+        }
+
+        async function loadProtein() {
+            try {
+                const response = await fetch("7L30.cif");
+                if (!response.ok) throw new Error("Unable to load 7L30.cif");
+
+                const cifData = await response.text();
+                proteinViewer = $3Dmol.createViewer("protein-viewer", { backgroundColor: "white" });
+                proteinViewer.addModel(cifData, "cif");
+                proteinViewer.setStyle({}, { cartoon: { color: "spectrum" } });
+                proteinViewer.zoomTo();
+                proteinViewer.render();
+
+                setStatus("7L30.cif loaded successfully.");
+            } catch (error) {
+                setStatus(
+                    "Could not load model. If testing locally, use a local server (not file:///).",
+                    true
+                );
+                console.error(error);
+            }
+        }
+
+        document.querySelectorAll(".btn").forEach((button) => {
+            button.addEventListener("click", () => {
+                const style = button.dataset.style;
+                if (style === "reset") {
+                    if (proteinViewer) {
+                        proteinViewer.zoomTo();
+                        proteinViewer.render();
+                    }
+                    return;
+                }
+                applyStyle(style);
+            });
+        });
+
+        loadProtein();
+    </script>
+</body>
+</html>
