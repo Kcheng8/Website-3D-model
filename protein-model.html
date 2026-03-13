@@ -219,6 +219,15 @@
                 <span>Detailed</span>
             </div>
 
+            <div class="mode-switch" aria-label="Molecular surface switch">
+                <span id="surfaceLabel">Surface: Off</span>
+                <label class="switch" for="surfaceSwitch">
+                    <input id="surfaceSwitch" type="checkbox" aria-label="Toggle molecular surface" />
+                    <span class="slider"></span>
+                </label>
+                <span>On</span>
+            </div>
+
             <div class="help">
                 <strong>How to use</strong>
                 <ul>
@@ -235,7 +244,7 @@
             <div class="meta">
                 <div class="meta-item"><strong>File</strong>7L30.cif</div>
                 <div class="meta-item"><strong>Interaction</strong>Rotate, zoom, translate</div>
-                <div class="meta-item"><strong>Representations</strong>Cartoon, stick, sphere, line</div>
+                <div class="meta-item"><strong>Representations</strong>Cartoon, stick, sphere, line, molecular surface</div>
             </div>
         </aside>
     </main>
@@ -245,7 +254,10 @@
         let proteinViewer = null;
         let renderQueued = false;
         let useSimplifiedRepresentations = true;
-        let currentStyle = "cartoon";
+        let surfaceEnabled = true;
+        let surfaceRef = null;
+        let surfaceRequestToken = 0;
+        let currentStyle = "line";
 
         function setStatus(message, isError = false) {
             const status = document.getElementById("viewerStatus");
@@ -273,6 +285,72 @@
             }
         }
 
+        function updateSurfaceSwitchUI() {
+            const switchInput = document.getElementById("surfaceSwitch");
+            const surfaceLabel = document.getElementById("surfaceLabel");
+            if (switchInput) {
+                switchInput.checked = surfaceEnabled;
+            }
+            if (surfaceLabel) {
+                surfaceLabel.textContent = surfaceEnabled ? "Surface: On" : "Surface: Off";
+            }
+        }
+
+        function removeCurrentSurface() {
+            if (!proteinViewer || surfaceRef === null || surfaceRef === undefined) return;
+            proteinViewer.removeSurface(surfaceRef);
+            surfaceRef = null;
+        }
+
+        function applySurface() {
+            if (!proteinViewer) return;
+
+            surfaceRequestToken += 1;
+            const currentToken = surfaceRequestToken;
+            removeCurrentSurface();
+
+            if (!surfaceEnabled) {
+                queueRender();
+                return;
+            }
+
+            const surfaceSelection = useSimplifiedRepresentations ? { atom: "CA" } : {};
+            const surfaceResult = proteinViewer.addSurface(
+                $3Dmol.SurfaceType.SES,
+                { opacity: 0.35, color: "#9ec5ff" },
+                surfaceSelection
+            );
+
+            Promise.resolve(surfaceResult)
+                .then((result) => {
+                    if (currentToken !== surfaceRequestToken) {
+                        if (result !== null && result !== undefined) {
+                            proteinViewer.removeSurface(result);
+                        }
+                        return;
+                    }
+                    surfaceRef = result;
+                    queueRender();
+                })
+                .catch((error) => {
+                    console.error(error);
+                    setStatus("Surface rendering failed. Try Fast mode or disable surface.", true);
+                });
+        }
+
+        function deferSurfaceRender() {
+            const renderSurface = () => {
+                if (!proteinViewer || !surfaceEnabled) return;
+                applySurface();
+            };
+
+            if ("requestIdleCallback" in window) {
+                window.requestIdleCallback(renderSurface, { timeout: 900 });
+            } else {
+                setTimeout(renderSurface, 120);
+            }
+        }
+
         function applyStyle(style) {
             if (!proteinViewer) return;
             proteinViewer.setStyle({}, {});
@@ -297,11 +375,21 @@
             useSimplifiedRepresentations = switchInput ? !switchInput.checked : true;
             updateModeSwitchUI();
             applyStyle(currentStyle);
+            applySurface();
             setStatus(
                 useSimplifiedRepresentations
                     ? "Fast mode enabled (faster, lower detail)."
                     : "Detailed mode enabled."
             );
+        }
+
+        function toggleSurfaceMode() {
+            if (!proteinViewer) return;
+            const switchInput = document.getElementById("surfaceSwitch");
+            surfaceEnabled = switchInput ? switchInput.checked : false;
+            updateSurfaceSwitchUI();
+            applySurface();
+            setStatus(surfaceEnabled ? "Molecular surface enabled." : "Molecular surface disabled.");
         }
 
         async function loadProtein() {
@@ -317,12 +405,15 @@
                 proteinViewer.addModel(cifData, "cif");
 
                 useSimplifiedRepresentations = true;
+                surfaceEnabled = true;
                 updateModeSwitchUI();
+                updateSurfaceSwitchUI();
                 applyStyle(currentStyle);
                 proteinViewer.zoomTo();
                 queueRender();
+                deferSurfaceRender();
 
-                setStatus("7L30.cif loaded successfully (fast mode default).");
+                setStatus("7L30.cif loaded. Fast mode active; surface will appear shortly.");
             } catch (error) {
                 setStatus(
                     "Could not load model. If testing locally, use a local server (not file:///).",
@@ -351,6 +442,13 @@
         if (detailSwitch) {
             detailSwitch.addEventListener("change", () => {
                 togglePerformanceMode();
+            });
+        }
+
+        const surfaceSwitch = document.getElementById("surfaceSwitch");
+        if (surfaceSwitch) {
+            surfaceSwitch.addEventListener("change", () => {
+                toggleSurfaceMode();
             });
         }
 
