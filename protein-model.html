@@ -102,6 +102,60 @@
             max-height: 100%;
         }
 
+        .mode-switch {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin: 2px 0 14px;
+            color: #5b6574;
+            font-size: 0.92rem;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 46px;
+            height: 26px;
+            flex-shrink: 0;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            inset: 0;
+            cursor: pointer;
+            background-color: #c7d2e5;
+            border-radius: 999px;
+            transition: background-color 0.2s ease;
+        }
+
+        .slider::before {
+            content: "";
+            position: absolute;
+            height: 20px;
+            width: 20px;
+            left: 3px;
+            top: 3px;
+            background: #fff;
+            border-radius: 50%;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+            transition: transform 0.2s ease;
+        }
+
+        .switch input:checked + .slider {
+            background-color: var(--primary);
+        }
+
+        .switch input:checked + .slider::before {
+            transform: translateX(20px);
+        }
+
         .meta {
             display: grid;
             gap: 10px;
@@ -156,6 +210,15 @@
             <p class="status" id="viewerStatus">Loading 7L30.cif...</p>
             <div id="protein-viewer" class="viewer" aria-label="Interactive 3D protein model"></div>
 
+            <div class="mode-switch" aria-label="Performance mode switch">
+                <span id="modeLabel">Mode: Fast</span>
+                <label class="switch" for="detailSwitch">
+                    <input id="detailSwitch" type="checkbox" aria-label="Switch between fast and detailed mode" />
+                    <span class="slider"></span>
+                </label>
+                <span>Detailed</span>
+            </div>
+
             <div class="help">
                 <strong>How to use</strong>
                 <ul>
@@ -181,7 +244,8 @@
     <script>
         let proteinViewer = null;
         let renderQueued = false;
-        let useSimplifiedRepresentations = false;
+        let useSimplifiedRepresentations = true;
+        let currentStyle = "cartoon";
 
         function setStatus(message, isError = false) {
             const status = document.getElementById("viewerStatus");
@@ -196,6 +260,17 @@
                 proteinViewer.render();
                 renderQueued = false;
             });
+        }
+
+        function updateModeSwitchUI() {
+            const switchInput = document.getElementById("detailSwitch");
+            const modeLabel = document.getElementById("modeLabel");
+            if (switchInput) {
+                switchInput.checked = !useSimplifiedRepresentations;
+            }
+            if (modeLabel) {
+                modeLabel.textContent = useSimplifiedRepresentations ? "Mode: Fast" : "Mode: Detailed";
+            }
         }
 
         function applyStyle(style) {
@@ -216,6 +291,19 @@
             queueRender();
         }
 
+        function togglePerformanceMode() {
+            if (!proteinViewer) return;
+            const switchInput = document.getElementById("detailSwitch");
+            useSimplifiedRepresentations = switchInput ? !switchInput.checked : true;
+            updateModeSwitchUI();
+            applyStyle(currentStyle);
+            setStatus(
+                useSimplifiedRepresentations
+                    ? "Fast mode enabled (faster, lower detail)."
+                    : "Detailed mode enabled."
+            );
+        }
+
         async function loadProtein() {
             try {
                 const response = await fetch("7L30.cif");
@@ -228,19 +316,13 @@
                 });
                 proteinViewer.addModel(cifData, "cif");
 
-                const model = proteinViewer.getModel();
-                const atomCount = model ? model.selectedAtoms({}).length : 0;
-                useSimplifiedRepresentations = atomCount > 12000;
-
-                proteinViewer.setStyle({}, { cartoon: { color: "spectrum" } });
+                useSimplifiedRepresentations = true;
+                updateModeSwitchUI();
+                applyStyle(currentStyle);
                 proteinViewer.zoomTo();
                 queueRender();
 
-                if (useSimplifiedRepresentations) {
-                    setStatus("7L30.cif loaded successfully (performance mode enabled).");
-                } else {
-                    setStatus("7L30.cif loaded successfully.");
-                }
+                setStatus("7L30.cif loaded successfully (fast mode default).");
             } catch (error) {
                 setStatus(
                     "Could not load model. If testing locally, use a local server (not file:///).",
@@ -260,9 +342,17 @@
                     }
                     return;
                 }
+                currentStyle = style;
                 applyStyle(style);
             });
         });
+
+        const detailSwitch = document.getElementById("detailSwitch");
+        if (detailSwitch) {
+            detailSwitch.addEventListener("change", () => {
+                togglePerformanceMode();
+            });
+        }
 
         loadProtein();
     </script>
