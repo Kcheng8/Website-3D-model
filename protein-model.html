@@ -265,6 +265,22 @@
             status.style.color = isError ? "#b42318" : "#5b6574";
         }
 
+        async function fetchCifData() {
+            try {
+                const gzResponse = await fetch("7L30.cif.gz", { cache: "force-cache" });
+                if (gzResponse.ok && gzResponse.body && "DecompressionStream" in window) {
+                    const decompressedStream = gzResponse.body.pipeThrough(new DecompressionStream("gzip"));
+                    return await new Response(decompressedStream).text();
+                }
+            } catch (error) {
+                console.warn("Compressed model load failed, falling back to .cif", error);
+            }
+
+            const response = await fetch("7L30.cif", { cache: "force-cache" });
+            if (!response.ok) throw new Error("Unable to load 7L30.cif");
+            return await response.text();
+        }
+
         function queueRender() {
             if (!proteinViewer || renderQueued) return;
             renderQueued = true;
@@ -394,10 +410,7 @@
 
         async function loadProtein() {
             try {
-                const response = await fetch("7L30.cif");
-                if (!response.ok) throw new Error("Unable to load 7L30.cif");
-
-                const cifData = await response.text();
+                const cifData = await fetchCifData();
                 proteinViewer = $3Dmol.createViewer("protein-viewer", {
                     backgroundColor: "white",
                     antialias: false
