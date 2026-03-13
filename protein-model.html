@@ -180,6 +180,8 @@
     <script src="https://3Dmol.org/build/3Dmol-min.js"></script>
     <script>
         let proteinViewer = null;
+        let renderQueued = false;
+        let useSimplifiedRepresentations = false;
 
         function setStatus(message, isError = false) {
             const status = document.getElementById("viewerStatus");
@@ -187,22 +189,31 @@
             status.style.color = isError ? "#b42318" : "#5b6574";
         }
 
+        function queueRender() {
+            if (!proteinViewer || renderQueued) return;
+            renderQueued = true;
+            requestAnimationFrame(() => {
+                proteinViewer.render();
+                renderQueued = false;
+            });
+        }
+
         function applyStyle(style) {
             if (!proteinViewer) return;
             proteinViewer.setStyle({}, {});
+            const detailSelection = useSimplifiedRepresentations ? { atom: "CA" } : {};
 
             if (style === "cartoon") {
                 proteinViewer.setStyle({}, { cartoon: { color: "spectrum" } });
             } else if (style === "stick") {
-                proteinViewer.setStyle({}, { stick: { radius: 0.18, colorscheme: "greenCarbon" } });
+                proteinViewer.setStyle(detailSelection, { stick: { radius: 0.14, colorscheme: "greenCarbon" } });
             } else if (style === "sphere") {
-                proteinViewer.setStyle({}, { sphere: { scale: 0.28, colorscheme: "chain" } });
+                proteinViewer.setStyle(detailSelection, { sphere: { scale: 0.22, colorscheme: "chain" } });
             } else if (style === "line") {
-                proteinViewer.setStyle({}, { line: { colorscheme: "chain" } });
+                proteinViewer.setStyle(detailSelection, { line: { colorscheme: "chain" } });
             }
 
-            proteinViewer.zoomTo();
-            proteinViewer.render();
+            queueRender();
         }
 
         async function loadProtein() {
@@ -211,13 +222,25 @@
                 if (!response.ok) throw new Error("Unable to load 7L30.cif");
 
                 const cifData = await response.text();
-                proteinViewer = $3Dmol.createViewer("protein-viewer", { backgroundColor: "white" });
+                proteinViewer = $3Dmol.createViewer("protein-viewer", {
+                    backgroundColor: "white",
+                    antialias: false
+                });
                 proteinViewer.addModel(cifData, "cif");
+
+                const model = proteinViewer.getModel();
+                const atomCount = model ? model.selectedAtoms({}).length : 0;
+                useSimplifiedRepresentations = atomCount > 12000;
+
                 proteinViewer.setStyle({}, { cartoon: { color: "spectrum" } });
                 proteinViewer.zoomTo();
-                proteinViewer.render();
+                queueRender();
 
-                setStatus("7L30.cif loaded successfully.");
+                if (useSimplifiedRepresentations) {
+                    setStatus("7L30.cif loaded successfully (performance mode enabled).");
+                } else {
+                    setStatus("7L30.cif loaded successfully.");
+                }
             } catch (error) {
                 setStatus(
                     "Could not load model. If testing locally, use a local server (not file:///).",
@@ -233,7 +256,7 @@
                 if (style === "reset") {
                     if (proteinViewer) {
                         proteinViewer.zoomTo();
-                        proteinViewer.render();
+                        queueRender();
                     }
                     return;
                 }
