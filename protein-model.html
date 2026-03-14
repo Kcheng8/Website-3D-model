@@ -38,8 +38,10 @@
             margin: 0 auto;
             padding: 28px 20px 44px;
             display: grid;
-            grid-template-columns: minmax(0, 1.65fr) minmax(280px, 320px);
-            grid-template-areas: "viewer panel";
+            grid-template-columns: 1fr;
+            grid-template-areas:
+                "viewer"
+                "panel";
             gap: 24px;
             align-items: start;
         }
@@ -52,7 +54,7 @@
         }
 
         .viewer-card { grid-area: viewer; min-width: 0; display: flex; flex-direction: column; }
-        .panel { grid-area: panel; position: sticky; top: 20px; }
+        .panel { grid-area: panel; position: static; }
 
         .viewer-title, .panel h2 { color: var(--primary); margin-bottom: 10px; }
 
@@ -217,36 +219,14 @@
         <section class="card viewer-card">
             <h2 class="viewer-title">3D Viewer</h2>
 
-            <div class="controls">
-                <button class="btn" type="button" data-style="cartoon">Cartoon</button>
-                <button class="btn" type="button" data-style="stick">Sticks</button>
-                <button class="btn" type="button" data-style="sphere">Spheres</button>
-                <button class="btn" type="button" data-style="line">Lines</button>
-                <button class="btn" type="button" data-style="reset">Reset View</button>
-            </div>
-
             <p class="status" id="viewerStatus">Loading 7L30.bcif...</p>
             <div class="progress-wrap" id="progressWrap">
                 <div class="progress-bar" id="progressBar"></div>
             </div>
             <div id="protein-viewer" class="viewer" aria-label="Interactive 3D protein model"></div>
 
-            <div class="mode-switch" aria-label="Performance mode switch">
-                <span id="modeLabel">Mode: Fast</span>
-                <label class="switch" for="detailSwitch">
-                    <input id="detailSwitch" type="checkbox" aria-label="Switch between fast and detailed mode" />
-                    <span class="slider"></span>
-                </label>
-                <span>Detailed</span>
-            </div>
-
-            <div class="mode-switch" aria-label="Molecular surface switch">
-                <span id="surfaceLabel">Surface: Off</span>
-                <label class="switch" for="surfaceSwitch">
-                    <input id="surfaceSwitch" type="checkbox" aria-label="Toggle molecular surface" />
-                    <span class="slider"></span>
-                </label>
-                <span>On</span>
+            <div class="controls">
+                <button class="btn" id="resetViewBtn" type="button">Reset View</button>
             </div>
 
             <div class="help">
@@ -276,7 +256,6 @@
     <script>
         let proteinViewer = null;
         let plugin = null;
-        let currentStyle = "cartoon";
 
         function setStatus(message, isError = false) {
             const status = document.getElementById("viewerStatus");
@@ -314,36 +293,6 @@
             ];
         }
 
-        function disableUnsupportedSwitches() {
-            const switchInput = document.getElementById("detailSwitch");
-            const modeLabel = document.getElementById("modeLabel");
-            if (switchInput) {
-                switchInput.checked = false;
-                switchInput.disabled = true;
-            }
-            if (modeLabel) {
-                modeLabel.textContent = "Mode: Mol*";
-            }
-            const surfaceLabel = document.getElementById("surfaceLabel");
-            const surfaceSwitch = document.getElementById("surfaceSwitch");
-            if (surfaceSwitch) {
-                surfaceSwitch.checked = false;
-                surfaceSwitch.disabled = true;
-            }
-            if (surfaceLabel) {
-                surfaceLabel.textContent = "Surface: Use Mol* panel";
-            }
-        }
-
-        function applyStyle(style) {
-            if (!plugin) return;
-
-            currentStyle = style;
-            setStatus(
-                "Mol* loaded. Use the right-side Mol* controls for style presets (Cartoon, Ball & Stick, Surface)."
-            );
-        }
-
         async function loadProtein() {
             try {
                 proteinViewer = await molstar.Viewer.create("protein-viewer", {
@@ -378,7 +327,6 @@
                     throw lastLoadError || new Error("No compatible model source could be loaded.");
                 }
 
-                disableUnsupportedSwitches();
                 setProgress(0);
 
                 setStatus(loadedSource.label + " loaded in Mol*. Use the Mol* side panel for visual styles.");
@@ -393,18 +341,14 @@
             }
         }
 
-        document.querySelectorAll(".btn").forEach((button) => {
-            button.addEventListener("click", () => {
-                const style = button.dataset.style;
-                if (style === "reset") {
-                    if (plugin?.canvas3d) {
-                        plugin.canvas3d.requestCameraReset({ durationMs: 250 });
-                    }
-                    return;
+        const resetViewButton = document.getElementById("resetViewBtn");
+        if (resetViewButton) {
+            resetViewButton.addEventListener("click", () => {
+                if (plugin?.canvas3d) {
+                    plugin.canvas3d.requestCameraReset({ durationMs: 250 });
                 }
-                applyStyle(style);
             });
-        });
+        }
 
         loadProtein();
     </script>
