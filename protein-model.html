@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Interactive Protein Model</title>
-    <meta name="description" content="Interactive 3D protein model viewer for 7L30.cif" />
+    <meta name="description" content="Interactive 3D protein model viewer for 7L30.bcif with CIF fallback" />
     <style>
         :root {
             --primary: #1f3a5f;
@@ -225,7 +225,7 @@
                 <button class="btn" type="button" data-style="reset">Reset View</button>
             </div>
 
-            <p class="status" id="viewerStatus">Loading 7L30.cif...</p>
+            <p class="status" id="viewerStatus">Loading 7L30.bcif...</p>
             <div class="progress-wrap" id="progressWrap">
                 <div class="progress-bar" id="progressBar"></div>
             </div>
@@ -261,9 +261,10 @@
 
         <aside class="card panel">
             <h2>Model Details</h2>
-            <p>This page loads the local file <strong>7L30.cif</strong> and renders it with 3Dmol.js.</p>
+            <p>This page loads <strong>7L30.bcif</strong> first for faster startup, with CIF fallback if needed.</p>
             <div class="meta">
-                <div class="meta-item"><strong>File</strong>7L30.cif</div>
+                <div class="meta-item"><strong>Primary file</strong>7L30.bcif</div>
+                <div class="meta-item"><strong>Fallbacks</strong>7L30.cif.gz, 7L30.cif</div>
                 <div class="meta-item"><strong>Interaction</strong>Rotate, zoom, translate</div>
                 <div class="meta-item"><strong>Representations</strong>Cartoon, stick, sphere, line, molecular surface</div>
             </div>
@@ -316,26 +317,45 @@
             return new Blob(chunks);
         }
 
-        async function fetchCifData() {
-            try {
-                if ("DecompressionStream" in window) {
-                    const blob = await fetchStreamWithProgress("7L30.cif.gz");
-                    setProgress(97);
-                    const stream = blob.stream().pipeThrough(new DecompressionStream("gzip"));
-                    const text = await new Response(stream).text();
-                    setProgress(100);
-                    return text;
+        function getModelSources() {
+            return [
+                {
+                    label: "7L30.bcif",
+                    format: "bcif",
+                    load: async () => {
+                        const blob = await fetchStreamWithProgress("7L30.bcif");
+                        setProgress(100);
+                        const buffer = await blob.arrayBuffer();
+                        return new Uint8Array(buffer);
+                    }
+                },
+                {
+                    label: "7L30.cif.gz",
+                    format: "cif",
+                    load: async () => {
+                        if (!("DecompressionStream" in window)) {
+                            throw new Error("DecompressionStream is not available in this browser.");
+                        }
+                        const blob = await fetchStreamWithProgress("7L30.cif.gz");
+                        setProgress(97);
+                        const stream = blob.stream().pipeThrough(new DecompressionStream("gzip"));
+                        const text = await new Response(stream).text();
+                        setProgress(100);
+                        return text;
+                    }
+                },
+                {
+                    label: "7L30.cif",
+                    format: "cif",
+                    load: async () => {
+                        const blob = await fetchStreamWithProgress("7L30.cif");
+                        setProgress(97);
+                        const text = await blob.text();
+                        setProgress(100);
+                        return text;
+                    }
                 }
-            } catch (error) {
-                console.warn("Compressed model load failed, falling back to .cif", error);
-                setProgress(0);
-            }
-
-            const blob = await fetchStreamWithProgress("7L30.cif");
-            setProgress(97);
-            const text = await blob.text();
-            setProgress(100);
-            return text;
+            ];
         }
 
         function queueRender() {
@@ -468,12 +488,34 @@
 
         async function loadProtein() {
             try {
-                const cifData = await fetchCifData();
                 proteinViewer = $3Dmol.createViewer("protein-viewer", {
                     backgroundColor: "white",
                     antialias: false
                 });
-                proteinViewer.addModel(cifData, "cif");
+                const modelSources = getModelSources();
+                let loadedSource = null;
+                let lastLoadError = null;
+
+                for (const source of modelSources) {
+                    try {
+                        setStatus("Loading " + source.label + "...");
+                        setProgress(0);
+                        const data = await source.load();
+                        proteinViewer.removeAllModels();
+                        proteinViewer.addModel(data, source.format);
+                        loadedSource = source;
+                        break;
+                    } catch (error) {
+                        lastLoadError = error;
+                        proteinViewer.removeAllModels();
+                        setProgress(0);
+                        console.warn(source.label + " failed, trying next format.", error);
+                    }
+                }
+
+                if (!loadedSource) {
+                    throw lastLoadError || new Error("No compatible model source could be loaded.");
+                }
 
                 useSimplifiedRepresentations = true;
                 surfaceEnabled = false;
@@ -484,10 +526,12 @@
                 queueRender();
                 setProgress(0);
 
-                setStatus("7L30.cif loaded. Toggle surface to enable it.");
+                setStatus(loadedSource.label + " loaded. Toggle surface to enable it.");
             } catch (error) {
                 setStatus(
-                    "Could not load model. If testing locally, use a local server (not file:///).",
+                    window.location.protocol === "file:"
+                        ? "Could not load model from file:///. Start a local server and open the http://localhost address instead."
+                        : "Could not load model. The viewer tried .bcif, .cif.gz, and .cif.",
                     true
                 );
                 console.error(error);
