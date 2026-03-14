@@ -271,14 +271,11 @@
         </aside>
     </main>
 
-    <script src="https://3Dmol.org/build/3Dmol-min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/molstar@5.7.0/build/viewer/molstar.css" />
+    <script src="https://unpkg.com/molstar@5.7.0/build/viewer/molstar.js"></script>
     <script>
         let proteinViewer = null;
-        let renderQueued = false;
-        let useSimplifiedRepresentations = true;
-        let surfaceEnabled = false;
-        let surfaceRef = null;
-        let surfaceRequestToken = 0;
+        let plugin = null;
         let currentStyle = "cartoon";
 
         function setStatus(message, isError = false) {
@@ -300,198 +297,65 @@
             }
         }
 
-        async function fetchStreamWithProgress(url) {
-            const response = await fetch(url, { cache: "force-cache" });
-            if (!response.ok || !response.body) throw new Error("Fetch failed: " + url);
-            const total = parseInt(response.headers.get("Content-Length") || "0");
-            const reader = response.body.getReader();
-            const chunks = [];
-            let received = 0;
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                chunks.push(value);
-                received += value.length;
-                if (total > 0) setProgress(Math.round((received / total) * 95));
-            }
-            return new Blob(chunks);
-        }
-
         function getModelSources() {
             return [
                 {
                     label: "7L30.bcif",
-                    format: "bcif",
-                    load: async () => {
-                        const blob = await fetchStreamWithProgress("7L30.bcif");
-                        setProgress(100);
-                        const buffer = await blob.arrayBuffer();
-                        return new Uint8Array(buffer);
-                    }
-                },
-                {
-                    label: "7L30.cif.gz",
-                    format: "cif",
-                    load: async () => {
-                        if (!("DecompressionStream" in window)) {
-                            throw new Error("DecompressionStream is not available in this browser.");
-                        }
-                        const blob = await fetchStreamWithProgress("7L30.cif.gz");
-                        setProgress(97);
-                        const stream = blob.stream().pipeThrough(new DecompressionStream("gzip"));
-                        const text = await new Response(stream).text();
-                        setProgress(100);
-                        return text;
-                    }
+                    url: "7L30.bcif",
+                    format: "mmcif",
+                    isBinary: true
                 },
                 {
                     label: "7L30.cif",
-                    format: "cif",
-                    load: async () => {
-                        const blob = await fetchStreamWithProgress("7L30.cif");
-                        setProgress(97);
-                        const text = await blob.text();
-                        setProgress(100);
-                        return text;
-                    }
+                    url: "7L30.cif",
+                    format: "mmcif",
+                    isBinary: false
                 }
             ];
         }
 
-        function queueRender() {
-            if (!proteinViewer || renderQueued) return;
-            renderQueued = true;
-            requestAnimationFrame(() => {
-                proteinViewer.render();
-                renderQueued = false;
-            });
-        }
-
-        function updateModeSwitchUI() {
+        function disableUnsupportedSwitches() {
             const switchInput = document.getElementById("detailSwitch");
             const modeLabel = document.getElementById("modeLabel");
             if (switchInput) {
-                switchInput.checked = !useSimplifiedRepresentations;
+                switchInput.checked = false;
+                switchInput.disabled = true;
             }
             if (modeLabel) {
-                modeLabel.textContent = useSimplifiedRepresentations ? "Mode: Fast" : "Mode: Detailed";
+                modeLabel.textContent = "Mode: Mol*";
             }
-        }
-
-        function updateSurfaceSwitchUI() {
-            const switchInput = document.getElementById("surfaceSwitch");
             const surfaceLabel = document.getElementById("surfaceLabel");
-            if (switchInput) {
-                switchInput.checked = surfaceEnabled;
+            const surfaceSwitch = document.getElementById("surfaceSwitch");
+            if (surfaceSwitch) {
+                surfaceSwitch.checked = false;
+                surfaceSwitch.disabled = true;
             }
             if (surfaceLabel) {
-                surfaceLabel.textContent = surfaceEnabled ? "Surface: On" : "Surface: Off";
-            }
-        }
-
-        function removeCurrentSurface() {
-            if (!proteinViewer || surfaceRef === null || surfaceRef === undefined) return;
-            proteinViewer.removeSurface(surfaceRef);
-            surfaceRef = null;
-        }
-
-        function applySurface() {
-            if (!proteinViewer) return;
-
-            surfaceRequestToken += 1;
-            const currentToken = surfaceRequestToken;
-            removeCurrentSurface();
-
-            if (!surfaceEnabled) {
-                queueRender();
-                return;
-            }
-
-            const surfaceSelection = useSimplifiedRepresentations ? { atom: "CA" } : {};
-            const surfaceResult = proteinViewer.addSurface(
-                $3Dmol.SurfaceType.SES,
-                { opacity: 0.35, color: "#9ec5ff" },
-                surfaceSelection
-            );
-
-            Promise.resolve(surfaceResult)
-                .then((result) => {
-                    if (currentToken !== surfaceRequestToken) {
-                        if (result !== null && result !== undefined) {
-                            proteinViewer.removeSurface(result);
-                        }
-                        return;
-                    }
-                    surfaceRef = result;
-                    queueRender();
-                })
-                .catch((error) => {
-                    console.error(error);
-                    setStatus("Surface rendering failed. Try Fast mode or disable surface.", true);
-                });
-        }
-
-        function deferSurfaceRender() {
-            const renderSurface = () => {
-                if (!proteinViewer || !surfaceEnabled) return;
-                applySurface();
-            };
-
-            if ("requestIdleCallback" in window) {
-                window.requestIdleCallback(renderSurface, { timeout: 900 });
-            } else {
-                setTimeout(renderSurface, 120);
+                surfaceLabel.textContent = "Surface: Use Mol* panel";
             }
         }
 
         function applyStyle(style) {
-            if (!proteinViewer) return;
-            proteinViewer.setStyle({}, {});
-            const detailSelection = useSimplifiedRepresentations ? { atom: "CA" } : {};
+            if (!plugin) return;
 
-            if (style === "cartoon") {
-                proteinViewer.setStyle({}, { cartoon: { color: "spectrum" } });
-            } else if (style === "stick") {
-                proteinViewer.setStyle(detailSelection, { stick: { radius: 0.14, colorscheme: "greenCarbon" } });
-            } else if (style === "sphere") {
-                proteinViewer.setStyle(detailSelection, { sphere: { scale: 0.22, colorscheme: "chain" } });
-            } else if (style === "line") {
-                // lines draw along bonds — CA selection has no bonds, so always use full atom set
-                proteinViewer.setStyle({}, { line: { colorscheme: "chain" } });
-            }
-
-            queueRender();
-        }
-
-        function togglePerformanceMode() {
-            if (!proteinViewer) return;
-            const switchInput = document.getElementById("detailSwitch");
-            useSimplifiedRepresentations = switchInput ? !switchInput.checked : true;
-            updateModeSwitchUI();
-            applyStyle(currentStyle);
-            applySurface();
+            currentStyle = style;
             setStatus(
-                useSimplifiedRepresentations
-                    ? "Fast mode enabled (faster, lower detail)."
-                    : "Detailed mode enabled."
+                "Mol* loaded. Use the right-side Mol* controls for style presets (Cartoon, Ball & Stick, Surface)."
             );
-        }
-
-        function toggleSurfaceMode() {
-            if (!proteinViewer) return;
-            const switchInput = document.getElementById("surfaceSwitch");
-            surfaceEnabled = switchInput ? switchInput.checked : false;
-            updateSurfaceSwitchUI();
-            applySurface();
-            setStatus(surfaceEnabled ? "Molecular surface enabled." : "Molecular surface disabled.");
         }
 
         async function loadProtein() {
             try {
-                proteinViewer = $3Dmol.createViewer("protein-viewer", {
-                    backgroundColor: "white",
-                    antialias: false
+                proteinViewer = await molstar.Viewer.create("protein-viewer", {
+                    layoutIsExpanded: false,
+                    layoutShowControls: true,
+                    viewportShowExpand: false,
+                    collapseLeftPanel: false,
+                    pdbProvider: "rcsb",
+                    emdbProvider: "pdbe"
                 });
+                plugin = proteinViewer.plugin;
+
                 const modelSources = getModelSources();
                 let loadedSource = null;
                 let lastLoadError = null;
@@ -499,16 +363,13 @@
                 for (const source of modelSources) {
                     try {
                         setStatus("Loading " + source.label + "...");
-                        setProgress(0);
-                        const data = await source.load();
-                        proteinViewer.removeAllModels();
-                        proteinViewer.addModel(data, source.format);
+                        setProgress(20);
+                        await proteinViewer.loadStructureFromUrl(source.url, source.format, source.isBinary);
+                        setProgress(100);
                         loadedSource = source;
                         break;
                     } catch (error) {
                         lastLoadError = error;
-                        proteinViewer.removeAllModels();
-                        setProgress(0);
                         console.warn(source.label + " failed, trying next format.", error);
                     }
                 }
@@ -517,21 +378,15 @@
                     throw lastLoadError || new Error("No compatible model source could be loaded.");
                 }
 
-                useSimplifiedRepresentations = true;
-                surfaceEnabled = false;
-                updateModeSwitchUI();
-                updateSurfaceSwitchUI();
-                applyStyle(currentStyle);
-                proteinViewer.zoomTo();
-                queueRender();
+                disableUnsupportedSwitches();
                 setProgress(0);
 
-                setStatus(loadedSource.label + " loaded. Toggle surface to enable it.");
+                setStatus(loadedSource.label + " loaded in Mol*. Use the Mol* side panel for visual styles.");
             } catch (error) {
                 setStatus(
                     window.location.protocol === "file:"
                         ? "Could not load model from file:///. Start a local server and open the http://localhost address instead."
-                        : "Could not load model. The viewer tried .bcif, .cif.gz, and .cif.",
+                        : "Could not load model. The viewer tried .bcif and .cif.",
                     true
                 );
                 console.error(error);
@@ -542,30 +397,14 @@
             button.addEventListener("click", () => {
                 const style = button.dataset.style;
                 if (style === "reset") {
-                    if (proteinViewer) {
-                        proteinViewer.zoomTo();
-                        queueRender();
+                    if (plugin?.canvas3d) {
+                        plugin.canvas3d.requestCameraReset({ durationMs: 250 });
                     }
                     return;
                 }
-                currentStyle = style;
                 applyStyle(style);
             });
         });
-
-        const detailSwitch = document.getElementById("detailSwitch");
-        if (detailSwitch) {
-            detailSwitch.addEventListener("change", () => {
-                togglePerformanceMode();
-            });
-        }
-
-        const surfaceSwitch = document.getElementById("surfaceSwitch");
-        if (surfaceSwitch) {
-            surfaceSwitch.addEventListener("change", () => {
-                toggleSurfaceMode();
-            });
-        }
 
         loadProtein();
     </script>
